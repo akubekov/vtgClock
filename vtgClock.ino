@@ -604,9 +604,11 @@ void playNextNote() {
     return;
   }
 
-  int idx = 0; int dur = 0; bool durDotted = false;
+  int idx = 0;
+  int dur = 0;
   while (idx < (int)note.length() && isDigit(note[idx])) { dur = dur * 10 + (note[idx] - '0'); idx++; }
-  if (idx < (int)note.length() && note[idx] == '.' && dur > 0) { durDotted = true; idx++; }
+  bool durDotted = false;
+  if (idx < (int)note.length() && note[idx] == '.') { durDotted = true; idx++; }
   if (dur == 0) dur = melodyDefaultDur;
   if (idx >= (int)note.length()) { if (melodyParsePos < (int)rtttl.length()) playNextNote(); else stopMelody(); return; }
 
@@ -627,32 +629,31 @@ void playNextNote() {
   if (idx < (int)note.length() && note[idx] == '#') { sharp = true; idx++; }
   if (sharp && noteNum >= 0) noteNum++;
 
-  bool noteDotted = false;
-  if (idx < (int)note.length() && note[idx] == '.') { noteDotted = true; idx++; }
-
   int octave = melodyDefaultOctave;
   if (idx < (int)note.length() && note[idx] >= '0' && note[idx] <= '9') { octave = note[idx] - '0'; idx++; }
 
+  // Пунктир после октавы (стандарт RTTTL: "c5.")
+  bool noteDotted = false;
+  if (idx < (int)note.length() && note[idx] == '.') { noteDotted = true; idx++; }
+
   bool dotted = durDotted || noteDotted;
   float freq = 0;
-  if (!isPause) freq = 440.0f * powf(2.0f, (float)(octave - 4) + (float)(noteNum - 9) / 12.0f);
+  if (!isPause) {
+    if (octave < 2) octave = 2;
+    if (octave > 7) octave = 7;
+    freq = 440.0f * powf(2.0f, (float)(octave - 4) + (float)(noteNum - 9) / 12.0f);
+  }
+
   float ms = (4.0f / (float)dur) * (60000.0f / (float)melodyBPM);
   if (dotted) ms *= 1.5f;
 
-  // --- ВЫВОД ЗВУКА (порядок важен: сначала частота, затем duty) ---
-    if (isPause || buzzerVolume == 0 || freq < 20.0f || freq > 20000.0f) {
-    ledcWrite(BUZZER_PIN, 0);
-    lastToneFreq = 0;
+  if (isPause || buzzerVolume == 0 || freq < 20.0f || freq > 20000.0f) {
+    BZ_WRITE(0);
   } else {
-    uint32_t f = (uint32_t)freq;
-    if (f != lastToneFreq) {
-      BZ_TONE(f);
-      lastToneFreq = f;
-    }
+    BZ_TONE((uint32_t)freq);
     uint32_t maxDuty = (1u << BUZZER_PWM_RES) - 1u;
-    uint32_t duty = ((maxDuty / 2u) * (uint32_t)buzzerVolume) / 100u;
-    if (duty < 1) duty = 1;
-    ledcWrite(BUZZER_PIN,duty);
+    uint32_t duty = (maxDuty / 2u);
+    BZ_WRITE(duty);
   }
 
   noteEndMs = millis() + (unsigned long)ms;
