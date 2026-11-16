@@ -582,7 +582,7 @@ void saveMelodies() {
   prefs.end();
 }
 void stopMelody() {
-  BZ_WRITE(0);
+  ledcWrite(BUZZER_PIN, 0);
   lastToneFreq = 0;
   melodyState = MEL_IDLE;
   melodyPlayingId = -1;
@@ -641,7 +641,7 @@ void playNextNote() {
 
   // --- ВЫВОД ЗВУКА (порядок важен: сначала частота, затем duty) ---
     if (isPause || buzzerVolume == 0 || freq < 20.0f || freq > 20000.0f) {
-    BZ_WRITE(0);
+    ledcWrite(BUZZER_PIN, 0);
     lastToneFreq = 0;
   } else {
     uint32_t f = (uint32_t)freq;
@@ -652,7 +652,7 @@ void playNextNote() {
     uint32_t maxDuty = (1u << BUZZER_PWM_RES) - 1u;
     uint32_t duty = ((maxDuty / 2u) * (uint32_t)buzzerVolume) / 100u;
     if (duty < 1) duty = 1;
-    BZ_WRITE(duty);
+    ledcWrite(BUZZER_PIN,duty);
   }
 
   noteEndMs = millis() + (unsigned long)ms;
@@ -1973,6 +1973,43 @@ static void httpEventHandler(struct mg_connection *c, int ev, void *ev_data) {
   mg_http_reply(c, 404, "Content-Type: text/plain\r\n", "Not found");
 }
 
+
+// ============================================================
+// ТЕСТОВАЯ МЕЛОДИЯ (временная, удалить после проверки)
+// Играет "Frère Jacques" напрямую через ledcWriteTone + delay.
+// Не использует RTTTL, startMelody() или melodyTick().
+// ============================================================
+void playTestMelody() {
+  struct Note { uint16_t freq; uint16_t dur; };
+  static const Note notes[] = {
+    // Frère Jacques (C D E C | C D E C | E F G | E F G | ...)
+    {262,300},{294,300},{330,300},{262,300},
+    {262,300},{294,300},{330,300},{262,300},
+    {330,300},{349,300},{392,600},
+    {330,300},{349,300},{392,600},
+    {392,150},{440,150},{392,150},{349,150},{330,300},{262,300},
+    {392,150},{440,150},{392,150},{349,150},{330,300},{262,300},
+    {262,300},{196,300},{262,600},
+    {262,300},{196,300},{262,600},
+  };
+  const size_t n = sizeof(notes) / sizeof(notes[0]);
+
+  Serial.printf("MELODY TEST: %u notes, GPIO%d\n", (unsigned)n, BUZZER_PIN);
+
+  const uint32_t maxDuty = (1u << BUZZER_PWM_RES) - 1u;
+  const uint32_t duty50 = maxDuty / 2u;  // 50% — как в ваших рабочих тестах
+
+  for (size_t i = 0; i < n; i++) {
+    ledcWriteTone(BUZZER_PIN, notes[i].freq);
+    ledcWrite(BUZZER_PIN, duty50);
+    delay(notes[i].dur);
+    ledcWrite(BUZZER_PIN, 0);
+    delay(30);
+  }
+  ledcWrite(BUZZER_PIN, 0);
+  Serial.println(F("MELODY TEST: done"));
+}
+
 // ============================================================
 // setup / loop
 // ============================================================
@@ -1980,7 +2017,7 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.println();
-  Serial.println("ESP32-C3 Clock v" FIRMWARE_VERSION);
+  Serial.println("ESP32-C3 Clock v" FIRMWARE_VERSION);  
 
   loadSettings();
   loadMelodies();
@@ -1989,18 +2026,27 @@ void setup() {
   FastLED.setBrightness(maxBrightness);
   FastLED.clear(true);
 
+Serial.println(F("=== LEDC TEST ==="));
+
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
-  if (!ledcAttach(BUZZER_PIN, 2000, BUZZER_PWM_RES)) {
-    Serial.println(F("BUZZER: ledcAttach FAILED"));
-  } else {
-    Serial.println(F("BUZZER: ledcAttach OK"));
-  }
-#else
-  ledcSetup(0, 2000, BUZZER_PWM_RES);
-  ledcAttachPin(BUZZER_PIN, 0);
-  Serial.println(F("BUZZER: ledc legacy OK"));
+  // Пробуем разные каналы, пока не заработает
+  ledcDetach(BUZZER_PIN);
+  bool ok = ledcAttachChannel(BUZZER_PIN, 2000, BUZZER_PWM_RES, 0);  // канал 0
+  Serial.printf("ledcAttachChannel(0): %s\n", ok ? "OK" : "FAIL");
 #endif
-  BZ_WRITE(0);   // тишина на старте
+
+/*ledcWriteTone(BUZZER_PIN, 440);
+delay(3000);
+ledcWrite(BUZZER_PIN, 0);*/
+
+/*delay(1000);
+//ledcAttach(BUZZER_PIN, 1000, 10);   // 1 кГц
+ledcWrite(BUZZER_PIN, 512);          // 50% duty → ~1.6 В среднего
+delay(3000);
+ledcWrite(BUZZER_PIN, 0);*/
+
+playTestMelody();
+
 
   pinMode(LDR_PIN, INPUT);
 
@@ -2029,8 +2075,8 @@ void setup() {
   displayModeStartAt = millis();
   needRecalcHolidays = true;
 
-  Serial.printf("BUZZER test on GPIO%d\n", BUZZER_PIN);
-  BZ_TONE(1000); BZ_WRITE(512); delay(500); BZ_WRITE(0);
+ /* Serial.printf("BUZZER test on GPIO%d\n", BUZZER_PIN);
+  BZ_TONE(1000); BZ_WRITE(512); delay(500); BZ_WRITE(0);*/
 }
 
 void loop() {
